@@ -1,61 +1,136 @@
-# Demo Devices Template
+# Fumis WiRCU
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Unofficial integration, not affiliated with Fumis (ATech elektronika) nor with
+the stove makers. It brings into Gladys a **pellet stove with the Fumis WiRCU
+Wi-Fi module** (Austroflamm, Haas+Sohn, Westfeuer and other brands that use
+Fumis electronics), through the **Fumis cloud**, **read only**.
+
+> **Warning: never tested with a real stove.** This integration was written
+> from the python-fumis library (the one of the Home Assistant integration)
+> and tested against a fake cloud only. Feedback is welcome.
+
+> **Undocumented API.** Fumis has not documented the API of its cloud
+> (`api.fumis.si`) officially: the reference library learnt it by observing
+> its own stoves. It may change or go away without notice, and the
+> integration stop working.
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+One Gladys device, **Fumis stove** (or "Austroflamm Clou Duo stove" for a
+known model), with, when the stove sends them:
 
-## Configuration
+| Feature                                | Value                                                                          |
+| -------------------------------------- | ------------------------------------------------------------------------------ |
+| State                                  | Off, Heating up, Ignition, Burning, Eco, Cooling down                          |
+| Phase                                  | The detailed phase of the stove (Pre-combustion, Cold start, Wood combustion…) |
+| Operating                              | 0/1                                                                            |
+| Room temperature                       | °C, the main sensor of the stove                                               |
+| Target temperature                     | °C, read only (a sensor, not a thermostat)                                     |
+| Combustion chamber temperature         | °C (Austroflamm and stoves with a thermocouple)                                |
+| Power level (set)                      | 1 to 5 usually                                                                 |
+| Heat output (kW)                       | The heat output the stove reports                                              |
+| Pellet level (%)                       | Only when the stove estimates it                                               |
+| Error, Error code                      | 0/1, and "E102: Chimney or burning pot dirty…"                                 |
+| Warning, Warning code                  | 0/1, and "A001: Low fuel level"…                                               |
+| Eco mode                               | 0/1, when the stove has one                                                    |
+| Door open                              | 0/1, on the Austroflamm Clou Duo only (the only model where it was checked)    |
+| Time to service                        | Hours (negative when the service is overdue)                                   |
+| Burning time                           | Hours                                                                          |
+| Igniter starts, Misfires, Overheatings | Counters                                                                       |
+| Wi-Fi signal (%)                       | The signal of the WiRCU module                                                 |
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+kW and % have no unit in Gladys (the core lists none for these categories):
+the unit is in the name. The heat output is **not** sent to the Gladys energy
+dashboard (it would count it as electricity).
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+Scene trigger **Fumis stove error or warning**: when a read shows a new error
+code (E…) or warning code (A…). Variables: `message`, `code` (E102, A001…)
+and `kind` (`error` or `warning`). The same code fires again only after it
+cleared. The codes last seen are kept in `/data`: a restart never fires an
+alarm still shown again. Never at the very first read.
 
-## Actions
+The badge of the device shows "cloud", or "unreachable" when the cloud does
+not answer, refuses the MAC address or the PIN, or does not reach the stove.
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+## Installation
 
-## Scenes
+1. The stove must already work with the app of its brand (for example
+   Austroflamm PelletControl): the WiRCU module is on your Wi-Fi and reaches
+   the Fumis cloud.
+2. Note the **MAC address** and the **PIN** printed on the label of the WiRCU
+   module (the ones the app asks for).
+3. In Gladys, install the Fumis WiRCU integration, enter the MAC address (with
+   or without ":") and the PIN, then save.
+4. Add the stove from the **Discovery** tab.
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+One stove per integration. When you change the MAC address, the old stove
+stays in Discovery with its features and an orange badge: delete it if you
+no longer want it.
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+## Read only
 
-## Dashboard
+This first version **controls nothing**: no ignition, no shutdown, no
+setpoint, no power level, no eco mode. A stove is a flame appliance, commands
+go through a cloud that relays them to the stove 2 to 5 minutes later without
+confirmation, and the integration was never tested with a real stove: v1 only
+reads. Every feature is read only; a command from Gladys (scene, dashboard,
+voice assistant) is refused and nothing is sent.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+## PIN, MAC address and privacy
 
-## Troubleshooting
+- The PIN is **kept by Gladys in its database, never shown again, and sent
+  only to the Fumis cloud** (`api.fumis.si`, over HTTPS), in a header of each
+  read, as the app does. The MAC address goes with it: together they give
+  access to the stove.
+- Neither the PIN nor the MAC address appears in the logs, the status
+  messages, the request URLs or the Gladys devices (the device is identified
+  by a hash of the MAC address).
+- The `/data` volume of the integration only keeps the current pause (429 or
+  the wait after errors), a stop on refused credentials and the error and
+  warning codes last seen, with a hash of the MAC address. Never the PIN, nor
+  a hash of it.
+- The integration introduces itself under its own name (`gladys-fumis`),
+  never as the app of a stove maker.
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+## Refresh
+
+The stove is read **every 60 seconds** by default (60 to 3600), one request
+at a time, never two closer than 3 seconds. The cloud gets new values from
+the stove about every 30 seconds. The **Test the connection** button and
+Discovery read only when the interval (30 seconds at least) has passed since
+the last attempt, successful or not, and no pause holds; otherwise the button
+shows the status and the time left.
+
+## Errors
+
+- **MAC address or PIN refused** (HTTP 401): reads stop; a new try after
+  10 min, 1 h, then every 6 h, or at once when you change them. **Test the
+  connection** also tries again, once the interval has passed since the last
+  attempt. Only a successful read lifts the stop, and it is kept across
+  restarts.
+- **Stove not connected to the cloud** (HTTP 404, WiRCU module off or without
+  Wi-Fi), cloud unreachable, cloud error (5xx, 403): a new try after 1, 2, 5,
+  10 then every 15 minutes, never faster than the interval. This wait is kept
+  across restarts.
+- **HTTP 429**: a pause of at least 1 minute (Retry-After when given, 6 h at
+  most), for every path, kept across restarts.
+- An answer too large (over 256 KB) or not JSON is refused.
+
+## Limits
+
+- Never tested with a real stove: the fields come from the reference library
+  and its sample answers.
+- API not documented officially: it may change without notice.
+- Internet access is needed: without the cloud, no values (the WiRCU module
+  has no documented local API).
+- No command (see the TODO file of the repository for a v2).
+
+## Credits
+
+- [python-fumis](https://github.com/frenck/python-fumis) by Franck Nijhof
+  (MIT), 0.4.2: the cloud API, the status, error and warning codes and the
+  reading of the values are ported to JavaScript.
+- See `THIRD_PARTY_NOTICES.md`.
+
+Fumis, WiRCU, Austroflamm, Haas+Sohn and Westfeuer are trademarks of their
+owners; this project is not affiliated with Fumis nor with these makers.

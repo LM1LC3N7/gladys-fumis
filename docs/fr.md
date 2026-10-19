@@ -1,67 +1,143 @@
-# Template de démonstration
+# Fumis WiRCU
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Intégration non officielle, sans lien avec Fumis (ATech elektronika) ni avec
+les fabricants de poêles. Elle amène dans Gladys un **poêle à granulés équipé
+du module Wi-Fi Fumis WiRCU** (Austroflamm, Haas+Sohn, Westfeuer et d'autres
+marques qui utilisent l'électronique Fumis), par le **cloud Fumis**, **en
+lecture seule**.
+
+> **Attention : jamais testé avec un vrai poêle.** Cette intégration a été
+> écrite à partir de la bibliothèque python-fumis (celle de l'intégration Home
+> Assistant) et testée contre un faux cloud seulement. Les retours sont les
+> bienvenus.
+
+> **API non documentée.** Fumis ne documente pas officiellement l'API de son
+> cloud (`api.fumis.si`) : la bibliothèque de référence l'a apprise en
+> observant ses propres poêles. Elle peut changer ou disparaître sans
+> préavis, et l'intégration cesser de fonctionner.
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+Un appareil Gladys, **Poêle Fumis** (ou « Poêle Austroflamm Clou Duo » pour
+un modèle reconnu), avec, quand le poêle les envoie :
 
-## Configuration
+| Fonctionnalité                          | Valeur                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------- |
+| État                                    | Arrêt, Préchauffage, Allumage, En chauffe, Éco, Refroidissement                       |
+| Phase                                   | La phase détaillée du poêle (Pré-combustion, Démarrage à froid, Combustion bois…)     |
+| En fonctionnement                       | 0/1                                                                                   |
+| Température ambiante                    | °C, la sonde principale du poêle                                                      |
+| Consigne                                | °C, en lecture seule (une sonde, pas un thermostat)                                   |
+| Température du foyer                    | °C (Austroflamm et poêles qui ont un thermocouple)                                    |
+| Niveau de puissance (réglé)             | 1 à 5 en général                                                                      |
+| Puissance thermique (kW)                | La puissance de chauffe annoncée par le poêle                                         |
+| Niveau de granulés (%)                  | Seulement si le poêle l'estime                                                        |
+| Erreur, Code d'erreur                   | 0/1, et « E102 : Cheminée ou creuset encrassé… »                                      |
+| Avertissement, Code d'avertissement     | 0/1, et « A001 : Niveau de granulés bas »…                                            |
+| Mode éco                                | 0/1, si le poêle le propose                                                           |
+| Porte ouverte                           | 0/1, sur l'Austroflamm Clou Duo seulement (le seul modèle où ce signal a été vérifié) |
+| Temps avant entretien                   | Heures (négatif quand l'entretien est dépassé)                                        |
+| Durée de combustion                     | Heures                                                                                |
+| Allumages, Allumages ratés, Surchauffes | Compteurs                                                                             |
+| Signal Wi-Fi (%)                        | Le signal du module WiRCU                                                             |
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+Les kW et les % n'ont pas d'unité dans Gladys (le cœur ne les propose pas
+pour ces catégories) : l'unité est dans le nom. La puissance thermique n'est
+**pas** envoyée au tableau de bord énergie de Gladys (il la compterait comme
+de l'électricité).
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+Déclencheur de scène **Erreur ou avertissement du poêle Fumis** : quand une
+lecture montre un nouveau code d'erreur (E…) ou d'avertissement (A…).
+Variables : `message`, `code` (E102, A001…) et `kind` (`error` ou
+`warning`). Le même code ne redéclenche qu'après avoir disparu. Les derniers
+codes vus sont gardés dans `/data` : un redémarrage ne redéclenche pas une
+alarme toujours présente. Jamais à la toute première lecture.
 
-## Actions
+Le badge de l'appareil affiche « cloud », ou « injoignable » quand le cloud
+ne répond pas, refuse l'adresse MAC ou le code PIN, ou n'atteint pas le poêle.
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+## Installation
 
-## Scènes
+1. Le poêle doit déjà fonctionner avec l'application de sa marque (par
+   exemple Austroflamm PelletControl) : le module WiRCU est sur votre Wi-Fi
+   et joint le cloud Fumis.
+2. Relevez l'**adresse MAC** et le **code PIN** imprimés sur l'étiquette du
+   module WiRCU (ce sont ceux que l'application demande).
+3. Dans Gladys, installez l'intégration Fumis WiRCU, saisissez l'adresse MAC
+   (avec ou sans « : ») et le code PIN, puis enregistrez.
+4. Ajoutez le poêle depuis l'onglet **Découverte**.
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+Un poêle par intégration. Si vous changez d'adresse MAC, l'ancien poêle reste
+dans la Découverte avec ses fonctionnalités et un badge orange : supprimez-le
+si vous n'en voulez plus.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+## Lecture seule
 
-## Tableau de bord
+Cette première version **ne commande rien** : ni allumage, ni extinction, ni
+consigne, ni niveau de puissance, ni mode éco. Un poêle est un appareil à
+flamme, les commandes passent par un cloud qui les relaie au poêle 2 à
+5 minutes plus tard sans confirmation, et l'intégration n'a jamais été testée
+avec un vrai poêle : la v1 lit seulement. Toutes les fonctionnalités sont en
+lecture seule ; une commande venue de Gladys (scène, tableau de bord,
+assistant vocal) est refusée sans rien envoyer.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+## Code PIN, adresse MAC et vie privée
 
-## Dépannage
+- Le code PIN est **gardé par Gladys dans sa base, jamais réaffiché, et
+  envoyé seulement au cloud Fumis** (`api.fumis.si`, en HTTPS), dans un
+  en-tête de chaque lecture, comme le fait l'application. L'adresse MAC
+  l'accompagne : ensemble ils donnent accès au poêle.
+- Ni le code PIN ni l'adresse MAC n'apparaissent dans les journaux, les
+  messages d'état, les adresses des requêtes ou les appareils Gladys (l'appareil
+  est identifié par une empreinte de l'adresse MAC).
+- Le volume `/data` de l'intégration garde seulement la pause en cours (429 ou
+  attente après des erreurs), un arrêt sur identifiants refusés et les
+  derniers codes d'erreur et d'avertissement vus, avec une empreinte de
+  l'adresse MAC. Ni le code PIN, ni son empreinte.
+- L'intégration se présente sous son propre nom (`gladys-fumis`), jamais sous
+  celui d'une application d'un fabricant.
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+## Rafraîchissement
+
+Le poêle est lu **toutes les 60 secondes** par défaut (60 à 3600), une seule
+requête à la fois, jamais deux à moins de 3 secondes. Le cloud reçoit de
+nouvelles valeurs du poêle environ toutes les 30 secondes. Le bouton
+**Tester la connexion** et la Découverte ne lisent que si l'intervalle
+(30 secondes au moins) est écoulé depuis la dernière tentative, réussie ou
+non, et qu'aucune pause n'est en cours ; sinon le bouton affiche l'état et le
+temps restant.
+
+## Erreurs
+
+- **Adresse MAC ou code PIN refusé** (HTTP 401) : les lectures s'arrêtent ;
+  un nouvel essai après 10 min, 1 h, puis toutes les 6 h, ou aussitôt quand
+  vous les changez. **Tester la connexion** réessaie aussi, une fois
+  l'intervalle écoulé depuis la dernière tentative. L'arrêt n'est levé que par
+  une lecture réussie, et il est gardé aux redémarrages.
+- **Poêle non connecté au cloud** (HTTP 404, module WiRCU éteint ou sans
+  Wi-Fi), cloud injoignable, erreur du cloud (5xx, 403) : nouvel essai après
+  1, 2, 5, 10 puis toutes les 15 minutes, jamais plus vite que l'intervalle.
+  Cette attente est gardée aux redémarrages.
+- **HTTP 429** : une pause d'au moins 1 minute (Retry-After s'il est donné,
+  6 h au plus), pour tous les chemins, gardée aux redémarrages.
+- Une réponse trop grande (plus de 256 Ko) ou qui n'est pas du JSON est
+  refusée.
+
+## Limites
+
+- Jamais testé avec un vrai poêle : les champs viennent de la bibliothèque de
+  référence et de ses réponses d'exemple.
+- API non documentée officiellement : elle peut changer sans préavis.
+- Il faut un accès Internet : sans cloud, pas de valeurs (le module WiRCU n'a
+  pas d'API locale documentée).
+- Pas de commande (voir le fichier TODO du dépôt pour une v2).
+
+## Crédits
+
+- [python-fumis](https://github.com/frenck/python-fumis) de Franck Nijhof
+  (MIT), 0.4.2 : l'API du cloud, les codes d'état, d'erreur et
+  d'avertissement et la lecture des valeurs sont portés en JavaScript.
+- Voir `THIRD_PARTY_NOTICES.md`.
+
+Fumis, WiRCU, Austroflamm, Haas+Sohn et Westfeuer sont des marques de leurs
+propriétaires ; ce projet est sans lien avec Fumis et avec ces fabricants.

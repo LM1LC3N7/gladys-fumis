@@ -1,177 +1,174 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Fumis WiRCU",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Pellet stoves with a Fumis WiRCU module (Austroflamm, Haas+Sohn…), read only, via the cloud.",
+    "fr": "Poêles à granulés à module Fumis WiRCU (Austroflamm, Haas+Sohn…), en lecture seule, par le cloud."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-fumis:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-fumis/main/cover.png",
+  "categories": ["climate"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your Fumis stove",
+        "fr": "Votre poêle Fumis"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Brings a pellet stove with a Fumis WiRCU Wi-Fi module (Austroflamm, Haas+Sohn, Westfeuer and other brands) into Gladys, read only: state, room temperature, setpoint, power level, heat output, pellet level, errors and warnings, counters, and a scene trigger on a new error or warning. Read every minute through the Fumis cloud, the one the stove apps use; Fumis does not document this API officially. Nothing can be changed on the stove from Gladys: no ignition, no shutdown, no setpoint. Never tested with a real stove. Not affiliated with Fumis nor with the stove makers.",
+        "fr": "Amène dans Gladys un poêle à granulés équipé du module Wi-Fi Fumis WiRCU (Austroflamm, Haas+Sohn, Westfeuer et d'autres marques), en lecture seule : état, température ambiante, consigne, niveau de puissance, puissance thermique, niveau de granulés, erreurs et avertissements, compteurs, et un déclencheur de scène sur une nouvelle erreur ou un nouvel avertissement. Lecture chaque minute par le cloud Fumis, celui des applications du poêle ; Fumis ne documente pas officiellement cette API. Rien ne peut être modifié sur le poêle depuis Gladys : ni allumage, ni extinction, ni consigne. Jamais testé avec un vrai poêle. Sans lien avec Fumis ni avec les fabricants de poêles."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-fumis/blob/main/docs/fr.md",
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-fumis/blob/main/docs/en.md",
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "mac_address",
+      "type": "string",
+      "label": {
+        "en": "MAC address of the WiRCU module",
+        "fr": "Adresse MAC du module WiRCU"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "Printed on the WiRCU module (12 hexadecimal digits, with or without \":\"). Sent only to the Fumis cloud, never shown in the devices.",
+        "fr": "Imprimée sur le module WiRCU (12 chiffres hexadécimaux, avec ou sans « : »). Envoyée seulement au cloud Fumis, jamais affichée dans les appareils."
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "placeholder": {
+        "en": "00:16:D0:12:34:56",
+        "fr": "00:16:D0:12:34:56"
+      },
+      "required": true
     },
     {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "pin",
+      "type": "secret",
+      "label": {
+        "en": "PIN of the WiRCU module",
+        "fr": "Code PIN du module WiRCU"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Printed on the WiRCU module, next to the MAC address. Kept by Gladys in its database, never shown again, sent only to the Fumis cloud (api.fumis.si, over HTTPS, in a request header).",
+        "fr": "Imprimé sur le module WiRCU, à côté de l'adresse MAC. Gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement au cloud Fumis (api.fumis.si, en HTTPS, dans un en-tête de la requête)."
+      },
+      "required": true
+    },
+    {
+      "key": "poll_interval",
+      "type": "number",
+      "label": {
+        "en": "Refresh interval (s)",
+        "fr": "Intervalle de rafraîchissement (s)"
+      },
+      "description": {
+        "en": "Seconds between two reads of the stove (60 to 3600). The cloud gets new values from the stove about every 30 seconds.",
+        "fr": "Secondes entre deux lectures du poêle (60 à 3600). Le cloud reçoit de nouvelles valeurs du poêle environ toutes les 30 secondes."
       },
       "required": false,
-      "default": 300,
+      "default": 60,
       "min": 60,
       "max": 3600
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the names",
+        "fr": "Langue des noms"
+      },
+      "description": {
+        "en": "Used for the names of the device and the features added from now on, the states, the error and warning texts.",
+        "fr": "Sert aux noms de l'appareil et des fonctionnalités ajoutés désormais, aux états, aux textes des erreurs et des avertissements."
+      },
+      "required": false,
+      "default": "fr",
+      "options": [
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
+      "description": {
+        "en": "Reads the stove once, if the refresh interval (30 s at least) has passed since the last read and no pause holds; otherwise shows the status and the time left. After a refused MAC address or PIN, tries again at once once the interval has passed.",
+        "fr": "Lit une fois le poêle, si l'intervalle de rafraîchissement (30 s au moins) est écoulé depuis la dernière lecture et qu'aucune pause n'est en cours ; sinon affiche l'état et le temps restant. Après une adresse MAC ou un code PIN refusé, réessaie aussitôt une fois l'intervalle écoulé."
+      },
+      "timeout_seconds": 60
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+      "key": "stove_alarm",
+      "label": {
+        "en": "Fumis stove error or warning",
+        "fr": "Erreur ou avertissement du poêle Fumis"
       },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
+      "description": {
+        "en": "When a read shows a new error code (E…) or a new warning code (A…) of the stove (every minute; never at the very first read; the same code fires again only after it cleared).",
+        "fr": "Quand une lecture montre un nouveau code d'erreur (E…) ou d'avertissement (A…) du poêle (chaque minute ; jamais à la toute première lecture ; le même code ne redéclenche qu'après avoir disparu)."
+      },
       "variables": [
         {
-          "key": "target",
+          "key": "message",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": {
+            "en": "Message",
+            "fr": "Message"
+          }
+        },
+        {
+          "key": "code",
+          "type": "string",
+          "label": {
+            "en": "Code (E102, A001…)",
+            "fr": "Code (E102, A001…)"
+          }
+        },
+        {
+          "key": "kind",
+          "type": "string",
+          "label": {
+            "en": "Kind (error or warning)",
+            "fr": "Type (error ou warning)"
+          }
         }
       ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

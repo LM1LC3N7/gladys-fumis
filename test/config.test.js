@@ -1,33 +1,107 @@
+// -----------------------------------------------------------------------------
+// The configuration, /data and the client's error mapping.
+// -----------------------------------------------------------------------------
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeConfig, DEFAULT_CONFIG } from '../src/config.js';
+import { FumisClient } from '../src/client.js';
+import { DEFAULTS, normalizeConfig, parseMac, parsePin, stoveKey } from '../src/config.js';
+import { TIMINGS } from '../src/constants.js';
+import { FumisError, errorReason, networkError, parseRetryAfter } from '../src/http.js';
+import { normalizeMemory } from '../src/store.js';
+import { MAC, NOW, PIN } from './fixtures/fumis.js';
 
-test('normalizeConfig returns the defaults when called with no argument', () => {
-  assert.deepEqual(normalizeConfig(), DEFAULT_CONFIG);
+test('MAC address: separators and case accepted, the API format kept', () => {
+  assert.deepEqual(parseMac('00:16:d0:a1:b2:c3'), { mac: '0016D0A1B2C3' });
+  assert.deepEqual(parseMac(' 00-16-D0-A1-B2-C3 '), { mac: '0016D0A1B2C3' });
+  assert.deepEqual(parseMac('0016.d0a1.b2c3'), { mac: '0016D0A1B2C3' });
+  assert.deepEqual(parseMac(''), {});
+  assert.deepEqual(parseMac(undefined), {});
+  assert.deepEqual(parseMac('0016D0A1B2'), { error: 'invalid' });
+  assert.deepEqual(parseMac('0016D0A1B2C3D4'), { error: 'invalid' });
+  assert.deepEqual(parseMac('GG16D0A1B2C3'), { error: 'invalid' });
+  assert.deepEqual(parseMac('x'.repeat(100)), { error: 'invalid' });
 });
 
-test('normalizeConfig keeps user values over the defaults', () => {
-  const config = normalizeConfig({ latitude: 45.5, longitude: -73.6, unit: 'fahrenheit' });
-  assert.equal(config.latitude, 45.5);
-  assert.equal(config.longitude, -73.6);
-  assert.equal(config.unit, 'fahrenheit');
+test('PIN: printable ASCII without spaces nor control characters', () => {
+  assert.deepEqual(parsePin(` ${PIN} `), { pin: PIN });
+  assert.deepEqual(parsePin(''), {});
+  assert.deepEqual(parsePin(1234), {});
+  assert.deepEqual(parsePin('12 34'), { error: 'invalid' });
+  assert.deepEqual(parsePin('1234\r\nX: y'), { error: 'invalid' });
+  assert.deepEqual(parsePin('é1234'), { error: 'invalid' });
+  assert.deepEqual(parsePin('1'.repeat(65)), { error: 'invalid' });
 });
 
-test('normalizeConfig coerces numeric strings coming from a form', () => {
-  const config = normalizeConfig({ latitude: '48.8', longitude: '2.3', poll_frequency: '600' });
-  assert.equal(config.latitude, 48.8);
-  assert.equal(config.longitude, 2.3);
-  assert.equal(config.poll_frequency, 600);
-  assert.equal(typeof config.poll_frequency, 'number');
+test('normalizeConfig: defaults, bounds, a key without the PIN', () => {
+  const config = normalizeConfig({ mac_address: MAC, pin: PIN, poll_interval: '5' });
+  assert.equal(config.pollInterval, 60);
+  assert.equal(normalizeConfig({ poll_interval: 99999 }).pollInterval, 3600);
+  assert.equal(normalizeConfig({}).pollInterval, DEFAULTS.poll_interval);
+  assert.equal(normalizeConfig({ language: 'DE' }).language, 'fr');
+  assert.equal(config.key, stoveKey(MAC));
+  assert.match(config.key, /^[0-9a-f]{32}$/);
+  assert.equal(config.deviceId, config.key.slice(0, 16));
+  assert.notEqual(stoveKey(MAC), stoveKey('0016D0A1B2C4'));
+  assert.equal(normalizeConfig({}).deviceId, '');
 });
 
-test('normalizeConfig falls back to the default for a missing numeric field', () => {
-  const config = normalizeConfig({ unit: 'celsius' });
-  assert.equal(config.poll_frequency, DEFAULT_CONFIG.poll_frequency);
+test('/data: repaired and capped when read back', () => {
+  const key = stoveKey(MAC);
+  assert.deepEqual(normalizeMemory(null, NOW), { key: '', pause: null, block: null, alarms: null });
+  const memory = normalizeMemory(
+    {
+      key,
+      pause: { kind: 'rate', until: NOW + 100 * TIMINGS.rateLimitMax, failures: 99 },
+      block: { retries: -1, retryAt: NOW * 10 },
+      alarms: { error: 102, alert: 'x' },
+    },
+    NOW,
+  );
+  assert.equal(memory.pause.until, NOW + TIMINGS.rateLimitMax);
+  assert.equal(memory.pause.failures, 10);
+  assert.deepEqual(memory.block, { retries: 0, retryAt: NOW + TIMINGS.refusedRetry.at(-1) });
+  assert.deepEqual(memory.alarms, { error: 102, alert: 0 });
+  assert.equal(normalizeMemory({ key: 'bad', pause: { until: NOW + 1 } }, NOW).pause, null);
 });
 
-test('GLADYS_PREFER_LOCAL defaults to true and only an explicit false disables it', () => {
-  assert.equal(normalizeConfig().GLADYS_PREFER_LOCAL, true);
-  assert.equal(normalizeConfig({ GLADYS_PREFER_LOCAL: true }).GLADYS_PREFER_LOCAL, true);
-  assert.equal(normalizeConfig({ GLADYS_PREFER_LOCAL: false }).GLADYS_PREFER_LOCAL, false);
+test('the client maps the statuses of the API', async () => {
+  const answers = [
+    [401, 'refused'],
+    [404, 'offline'],
+    [403, 'forbidden'],
+    [429, 'rate_limited'],
+    [500, 'unavailable'],
+    [302, 'http'],
+  ];
+  for (const [status, kind] of answers) {
+    const client = new FumisClient({
+      transport: async () => ({ status, headers: { 'retry-after': '120' }, body: '{}' }),
+    });
+    client.configure({ mac: MAC, pin: PIN });
+    await assert.rejects(client.readNow(1000), (err) => {
+      assert.equal(err.kind, kind);
+      assert.ok(!err.message.includes(PIN) && !err.message.includes(MAC));
+      if (kind === 'rate_limited') {
+        assert.equal(err.retryAfter, 120_000);
+      }
+      return true;
+    });
+  }
+  const unconfigured = new FumisClient({ transport: async () => assert.fail('sent') });
+  await assert.rejects(unconfigured.readNow(1000), { kind: 'no_config' });
+});
+
+test('errors never print what they do not know', () => {
+  const err = networkError(
+    Object.assign(new Error(`connect to ${MAC} with ${PIN}`), { code: 'ECONNRESET' }),
+  );
+  assert.equal(err.message, 'connection reset');
+  assert.equal(errorReason(err), 'connection reset (ECONNRESET)');
+  assert.equal(errorReason(new Error(PIN)), 'internal error');
+  assert.equal(networkError({ code: 'weird code!' }).message, 'network error');
+  assert.ok(networkError(new FumisError('timeout', 'x')) instanceof FumisError);
+  assert.equal(parseRetryAfter('30'), 30_000);
+  assert.equal(parseRetryAfter(''), undefined);
+  assert.equal(parseRetryAfter('Mon, 19 Oct 2026 10:01:00 GMT', NOW), 60_000);
 });

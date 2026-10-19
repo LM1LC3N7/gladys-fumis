@@ -12,44 +12,25 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
+- Pellet stoves with a Fumis WiRCU module (Austroflamm, Haas+Sohn,
+  Westfeuer…) through the Fumis cloud, read only (ported from python-fumis
+  0.4.2). The cloud API is not documented officially by Fumis.
+- MAC address and PIN of the WiRCU module (the PIN in a `secret` field);
+  neither is logged, shown, written to `/data` nor published to Gladys.
+- One device: state, phase, operating, room temperature, setpoint (read
+  only), combustion chamber temperature, power level, heat output, pellet
+  level, error and warning with their codes, eco mode, door (Clou Duo),
+  time to service, burning time, igniter starts, misfires, overheatings,
+  Wi-Fi signal, when the stove sends them.
+- Scene trigger "Fumis stove error or warning" (message, code, kind): a new
+  error or warning code; never on the first read.
+- Careful reads: every 60 s (60 to 3600), one request at a time, never two
+  closer than 3 s; refused credentials stop the reads (new try after 10 min,
+  1 h, then every 6 h); a 429 pauses every path for 60 s to 6 h; both kept in
+  `/data`; other errors (stove offline included) back off, never faster than
+  the interval.
+- "Test the connection" button; the status, the Discovery list and the badges
+  are sent again at each reconnection to Gladys.
+- Device and feature names in French or English.
 
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-fumis/commits/main

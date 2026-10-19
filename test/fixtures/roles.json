@@ -1,0 +1,23 @@
+[
+  "state",
+  "phase",
+  "active",
+  "room-temperature",
+  "target-temperature",
+  "combustion-temperature",
+  "power-level",
+  "heat-output",
+  "fuel-level",
+  "error",
+  "error-code",
+  "warning",
+  "warning-code",
+  "eco-mode",
+  "door-open",
+  "time-to-service",
+  "burning-hours",
+  "igniter-starts",
+  "misfires",
+  "overheatings",
+  "wifi-signal"
+]
