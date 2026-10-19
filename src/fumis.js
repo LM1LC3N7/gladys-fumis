@@ -62,10 +62,34 @@ export function parseBody(body) {
     throw new FumisError('bad_response', 'the answer is not a JSON object');
   }
   if (field(root, 'controller') === undefined && field(root, 'unit') === undefined) {
+    // An error envelope of the API ({"message": …, "code": 401}) sent with a
+    // 200: handled as the HTTP status it names.
+    const code = toInteger(field(root, 'code') ?? field(root, 'statusCode'));
+    if (code === 401) {
+      throw new FumisError('refused', 'the cloud refused the MAC address or the PIN', {
+        status: 401,
+      });
+    }
+    if (code === 404) {
+      throw new FumisError('offline', 'the stove is not connected to the cloud', { status: 404 });
+    }
     throw new FumisError('bad_response', 'the answer has no controller');
   }
   return root;
 }
+
+/**
+ * An error or alert code: a JSON integer from 0 to 999 (the API sends a
+ * number; the display shows three digits, E101 or A004), else undefined (a
+ * string, -1, 1e6…). Shared by the answer and /data, so an odd code is never
+ * fired nor remembered.
+ */
+export function readCode(raw) {
+  return Number.isInteger(raw) && raw >= 0 && raw <= 999 ? raw : undefined;
+}
+
+/** An answer older than this (stoveLastAvailability behind currentTime) is stale. */
+export const STALE_AFTER = 10 * 60;
 
 /** One temperature channel: `{ id, actual, set, onMainScreen, actualType, setType }`. */
 function temperature(entry) {
@@ -111,10 +135,18 @@ export function readInfo(root) {
   const statistic = field(controller, 'statistic');
   const vars = variables(field(controller, 'diagnostic'));
   const timeToService = toInteger(field(controller, 'timeToService'));
+  // The last contact of the stove with the cloud, against the cloud's clock
+  // (both unix seconds): undefined when either is absent.
+  const lastSeen = toInteger(field(controller, 'stoveLastAvailability'));
+  const cloudTime = toInteger(field(controller, 'currentTime'));
   return {
     status: toInteger(field(controller, 'status')),
-    error: toInteger(field(controller, 'error')),
-    alert: toInteger(field(controller, 'alert')),
+    error: readCode(field(controller, 'error')),
+    alert: readCode(field(controller, 'alert')),
+    unseenFor:
+      lastSeen !== undefined && cloudTime !== undefined && lastSeen > 0
+        ? Math.max(0, cloudTime - lastSeen)
+        : undefined,
     main,
     combustion: combustion?.actual,
     power: {
@@ -182,8 +214,13 @@ export const ERROR_CODES = [
 /** Alert codes known by the reference (controller.alert, shown as A001…). */
 export const ALERT_CODES = [1, 2, 3, 4, 5, 6, 7];
 
-/** "E102", "A004": the code as the stove display shows it. */
+/** "E102", "A004": the code as the stove display shows it (a code of readCode). */
 export const codeText = (prefix, code) => `${prefix}${String(code).padStart(3, '0')}`;
+
+/** The stove burns (combustion, wood combustion): its `kw` is a heat output. */
+export const BURNING = new Set([30, 110]);
+/** The stove is off: no heat output, whatever `kw` says (it may keep the nominal power). */
+export const OFF = new Set([0, 1, 2]);
 
 /** Known stove models (reference STOVE_MODELS): `${var96}:${var97}` -> name. */
 export const STOVE_MODELS = {

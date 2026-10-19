@@ -2,7 +2,7 @@
 // The stove -> one Gladys device, and its states (pure).
 //
 // One Gladys device per stove, `ext:<selector>:fumis:<id>` with `<id>` the
-// first 16 hexadecimal digits of a hash of the MAC address (src/config.js):
+// first 16 hexadecimal digits of a scrypt of the MAC address (src/config.js):
 // stable for the WiRCU module, and the MAC address itself (half of the
 // credential) never reaches Gladys. The features are keyed by their role (the
 // last part of their external id): those keys are published forever, never
@@ -27,7 +27,7 @@ import {
   DEVICE_FEATURE_UNITS as U,
 } from '@gladysassistant/integration-sdk';
 import { GLADYS, LIMITS } from './constants.js';
-import { codeText, isActive, modelOf, stateOf } from './fumis.js';
+import { BURNING, OFF, codeText, isActive, modelOf, stateOf } from './fumis.js';
 import {
   ALERT_LABELS,
   DEVICE_NAME,
@@ -159,10 +159,18 @@ export const ROLES = {
     present: (i) => i.power.setPower !== undefined,
     value: (i) => state(within(i.power.setPower, 0, 10, 0)),
   },
+  // `kw` may keep the nominal power while the stove is off (the reference
+  // fixtures show 7 kW off) and lags behind in the other phases: its value
+  // only while burning, 0 when off, nothing in between.
   'heat-output': {
     feature: decimal(0, 100),
     present: (i) => i.power.kw !== undefined,
-    value: (i) => state(within(i.power.kw, 0, 100, 2)),
+    value: (i) => {
+      if (OFF.has(i.status)) {
+        return state(0);
+      }
+      return BURNING.has(i.status) ? state(within(i.power.kw, 0, 100, 2)) : undefined;
+    },
   },
   'fuel-level': {
     feature: decimal(0, 100),

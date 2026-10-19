@@ -4,6 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { scryptSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import {
@@ -20,14 +21,17 @@ import {
   ALERT_CODES,
   ERROR_CODES,
   STATUS_STATE,
+  codeText,
   isActive,
   parseBody,
+  readCode,
   readInfo,
   stateOf,
   toNumber,
 } from '../src/fumis.js';
 import { ALERT_LABELS, ERROR_LABELS, STATUS_LABELS } from '../src/i18n.js';
-import { clouDuo, json, simpleStove } from './fixtures/fumis.js';
+import { KEY_COST, normalizeConfig, stoveKey } from '../src/config.js';
+import { MAC, PIN, clouDuo, json, simpleStove } from './fixtures/fumis.js';
 
 const read = (document) => readInfo(parseBody(json(document)));
 const asMap = (states) =>
@@ -138,7 +142,6 @@ test('states of the Clou Duo and of a plain stove', () => {
     'target-temperature': 21.5,
     'combustion-temperature': 190,
     'power-level': 5,
-    'heat-output': 5.7,
     'fuel-level': 95,
     error: 0,
     'error-code': 'No error',
@@ -160,6 +163,48 @@ test('states of the Clou Duo and of a plain stove', () => {
   assert.equal(plain['time-to-service'], undefined, '-1: no service counter');
 });
 
+test('heat output: kw while burning only, 0 when off, nothing in the other phases', () => {
+  const heat = (status, kw) => asMap(statesOf(read(clouDuo({ status, kw })), 'en'))['heat-output'];
+  // The reference fixtures: kw 7 while off.
+  assert.equal(heat(0, 7), 0);
+  assert.equal(heat(1, '7.0'), 0);
+  assert.equal(heat(2, 7), 0);
+  assert.equal(heat(30, '5.7'), 5.7);
+  assert.equal(heat(110, 4), 4);
+  for (const status of [10, 20, 21, 40, 50, 60, 80, 90, 100, 77]) {
+    assert.equal(heat(status, 7), undefined, `status ${status}`);
+  }
+});
+
+test('codes: integers from 0 to 999 only, shared by the answer and /data', () => {
+  for (const bad of [-1, 1e6, 1000, '102', 'E102', 1.5, null, true, NaN]) {
+    assert.equal(readCode(bad), undefined, String(bad));
+    const info = read(clouDuo({ error: bad, alert: bad }));
+    assert.equal(info.error, undefined);
+    assert.equal(info.alert, undefined);
+  }
+  assert.equal(readCode(0), 0);
+  assert.equal(readCode(999), 999);
+  assert.equal(codeText('E', readCode(5)), 'E005');
+});
+
+test('an error envelope in a 200 is handled as its status', () => {
+  const body = (code) => json({ message: 'x', code });
+  assert.throws(() => parseBody(body(401)), { kind: 'refused', status: 401 });
+  assert.throws(() => parseBody(body(404)), { kind: 'offline', status: 404 });
+  assert.throws(() => parseBody(json({ statusCode: 404 })), { kind: 'offline' });
+  assert.throws(() => parseBody(body(500)), { kind: 'bad_response' });
+});
+
+test('the last contact of the stove', () => {
+  assert.equal(read(clouDuo()).unseenFor, 20);
+  const old = clouDuo();
+  old.controller.stoveLastAvailability = old.controller.currentTime - 2 * 86400;
+  assert.equal(read(old).unseenFor, 2 * 86400);
+  delete old.controller.stoveLastAvailability;
+  assert.equal(read(old).unseenFor, undefined);
+});
+
 test('out-of-range values are not sent', () => {
   const states = asMap(
     statesOf(read(clouDuo({ room: 500, kw: '-3', quantity: 4, setPower: 99 })), 'en'),
@@ -169,7 +214,12 @@ test('out-of-range values are not sent', () => {
   }
 });
 
-test('ids: a hash of the MAC address, roles frozen', () => {
+test('ids: the scrypt of the MAC address, never the PIN, roles frozen', () => {
+  const derived = scryptSync(MAC, 'gladys-fumis', 32, KEY_COST).toString('hex');
+  assert.equal(stoveKey(MAC), derived.slice(0, 32));
+  assert.equal(normalizeConfig({ mac_address: MAC, pin: PIN }).deviceId, derived.slice(0, 16));
+  assert.equal(normalizeConfig({ mac_address: MAC, pin: 'other' }).key, stoveKey(MAC));
+  assert.equal(KEY_COST.N, 2 ** 15);
   const gladys = createFakeGladys();
   const device = buildDevice(gladys, {
     id: '0123456789abcdef',

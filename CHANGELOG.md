@@ -33,4 +33,23 @@ the notes of the version's GitHub Release.
   are sent again at each reconnection to Gladys.
 - Device and feature names in French or English.
 
+### Fixed
+
+- The heat output is published only while the stove burns, and 0 when it is
+  off (the stove may keep reporting its nominal power when off).
+- The device id is derived from the MAC address with scrypt (it is no
+  secret; the PIN is).
+- An error or warning code that is not an integer from 0 to 999 no longer
+  fires the scene trigger, nor again at each restart; an invalid memory in
+  `/data` only learns.
+- The codes seen are written again at the next read when a `/data` write
+  failed.
+- A 429 pause or a cloud error backoff is kept when the MAC address changes.
+- An answer from a stove the cloud has not seen for more than 10 minutes is
+  handled as the stove offline (old values no longer shown as live).
+- No more `appname` header; a 400 or 403 says the cloud may refuse
+  third-party clients.
+- An error envelope (`{"code": 401}` or `404`) sent with a 200 is handled as
+  that status.
+
 [Unreleased]: https://github.com/LM1LC3N7/gladys-fumis/commits/main

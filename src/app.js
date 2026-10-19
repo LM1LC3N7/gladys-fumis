@@ -32,14 +32,17 @@ import {
   parseFeatureId,
   statesOf,
 } from './devices.js';
-import { codeText, readInfo } from './fumis.js';
-import { errorReason } from './http.js';
+import { STALE_AFTER, codeText, readInfo } from './fumis.js';
+import { FumisError, errorReason } from './http.js';
 import { T, age, both, join, reasonOf, word } from './i18n.js';
 import { StatePublisher } from './publisher.js';
 import { fileStore, normalizeMemory } from './store.js';
 
 /** Errors after which the stove (or the cloud) did not answer at all. */
-const OFFLINE = new Set(['network', 'timeout', 'offline']);
+const OFFLINE = new Set(['network', 'timeout', 'offline', 'stale']);
+
+/** Errors of this stove only: their backoff is dropped when the MAC address changes. */
+const STOVE_ONLY = new Set(['offline', 'stale']);
 
 /** Devices of another stove (an earlier MAC address) kept in the Discovery list, at most. */
 const OTHER_STOVES = 5;
@@ -83,6 +86,8 @@ export class FumisApp {
      * any path; both kept in /data.
      */
     this.pauseKind = undefined;
+    /** The pause comes from the cloud itself (429, 5xx, network), not from this stove. */
+    this.pauseCloud = false;
     /** The codes last seen: `{ error, alert }` (kept in /data); undefined before the first read. */
     this.alarmSeen = undefined;
     this.alarmsChanged = false;
@@ -100,8 +105,10 @@ export class FumisApp {
     this.reset();
     this.memory = normalizeMemory(await this.store.load().catch(() => null), this.now());
     if (this.memory.key !== this.config.key) {
-      // Another stove: the pause, the stop and the codes of the previous one are not its own.
-      this.memory = { key: this.config.key, pause: null, block: null, alarms: null };
+      // Another stove: the stop and the codes of the previous one are not its
+      // own; a pause of the cloud itself (429, 5xx, network) still holds.
+      const pause = this.memory.pause?.cloud ? this.memory.pause : null;
+      this.memory = { key: this.config.key, pause, block: null, alarms: null };
     }
     if (fresh) {
       this.memory.block = null;
@@ -110,6 +117,7 @@ export class FumisApp {
     if (pause && pause.until > this.now()) {
       this.pausedUntil = pause.until;
       this.pauseKind = pause.kind;
+      this.pauseCloud = pause.cloud;
       this.failures = pause.failures;
     }
     if (block) {
@@ -194,6 +202,7 @@ export class FumisApp {
     this.failures = 0;
     this.pausedUntil = 0;
     this.pauseKind = undefined;
+    this.pauseCloud = false;
   }
 
   /**
@@ -260,23 +269,38 @@ export class FumisApp {
     return JSON.parse(this.lastStatus ?? '[false,null]')[1] ?? undefined;
   }
 
+  /** Writes /data; true when the write succeeded. */
   async saveMemory() {
-    await this.store
-      .save(this.memory)
-      .catch((err) => this.logger.warn(`Saving the state to /data failed: ${err.message}`));
+    try {
+      await this.store.save(this.memory);
+      return true;
+    } catch (err) {
+      this.logger.warn(`Saving the state to /data failed: ${err.message}`);
+      return false;
+    }
   }
 
-  /** The pause, the stop and the codes seen, with the stove they belong to. */
+  /**
+   * The pause, the stop and the codes seen, with the stove they belong to.
+   * The codes stay "changed" until a write succeeds: the next read writes
+   * them again, so a restart never fires an alarm already sent.
+   */
   async persist() {
     this.memory.key = this.config.key;
     this.memory.pause =
       this.pauseKind && this.now() < this.pausedUntil
-        ? { kind: this.pauseKind, until: this.pausedUntil, failures: this.failures }
+        ? {
+            kind: this.pauseKind,
+            until: this.pausedUntil,
+            failures: this.failures,
+            cloud: this.pauseCloud,
+          }
         : null;
     this.memory.block = this.blocked ? { retries: this.retries, retryAt: this.retryAt } : null;
     this.memory.alarms = this.alarmSeen ? { ...this.alarmSeen } : null;
-    this.alarmsChanged = false;
-    await this.saveMemory();
+    if (await this.saveMemory()) {
+      this.alarmsChanged = false;
+    }
   }
 
   async flush() {
@@ -356,7 +380,15 @@ export class FumisApp {
       if (generation !== this.generation) {
         return;
       }
-      this.ingest(readInfo(root));
+      const info = readInfo(root);
+      if (info.unseenFor !== undefined && info.unseenFor > STALE_AFTER) {
+        // The cloud answers with the last values it got: the stove is offline.
+        // Neither the states nor the codes seen are touched.
+        const err = new FumisError('stale', 'the cloud has not seen the stove for a while');
+        err.unseenFor = info.unseenFor * 1000;
+        throw err;
+      }
+      this.ingest(info);
       this.readAt = this.now();
       await this.publishDevices();
       const hadStop = this.blocked || this.retries > 0 || this.pauseKind !== undefined;
@@ -368,6 +400,7 @@ export class FumisApp {
       if (this.pauseKind === 'backoff' || this.now() >= this.pausedUntil) {
         this.pauseKind = undefined;
         this.pausedUntil = 0;
+        this.pauseCloud = false;
       }
       if (hadStop || this.alarmsChanged || this.memory.block || this.memory.pause) {
         await this.persist();
@@ -415,11 +448,19 @@ export class FumisApp {
         this.config.pollInterval * 1000,
         TIMINGS.backoff[Math.min(this.failures, TIMINGS.backoff.length - 1)],
       );
-      this.pauseKind = this.ratePaused ? 'rate' : 'backoff';
+      if (!this.ratePaused) {
+        this.pauseKind = 'backoff';
+        this.pauseCloud = !STOVE_ONLY.has(err?.kind);
+      }
       this.pausedUntil = Math.max(this.pausedUntil, this.now() + wait);
       this.offline = OFFLINE.has(err?.kind) || this.offline;
-      message =
-        err?.kind === 'offline' ? T.offline(age(wait)) : T.unreachable(reasonOf(err), age(wait));
+      if (err?.kind === 'offline') {
+        message = T.offline(age(wait));
+      } else if (err?.kind === 'stale') {
+        message = T.stale(age(err.unseenFor), age(wait));
+      } else {
+        message = T.unreachable(reasonOf(err), age(wait));
+      }
     }
     this.failures += 1;
     await this.persist();
@@ -434,6 +475,7 @@ export class FumisApp {
     const wait = Math.max(TIMINGS.rateLimitMin, Math.min(TIMINGS.rateLimitMax, asked));
     this.pausedUntil = Math.max(this.pausedUntil, this.now() + wait);
     this.pauseKind = 'rate';
+    this.pauseCloud = true;
     return wait;
   }
 
@@ -448,37 +490,38 @@ export class FumisApp {
    * The "stove alarm" scene events: an error or an alert code that differs
    * from the one last seen and is not 0 fires once (the same code fires
    * again only after it cleared). The codes last seen are kept in /data, so
-   * a restart never fires again an alarm still shown; the very first read
-   * without memory only learns. A code the answer lacks keeps the one known.
+   * a restart never fires again an alarm still shown; without memory (or
+   * with an invalid one) a code is only learnt. A code the answer lacks, or
+   * that readCode refused (not 0 to 999), keeps the one known and fires
+   * nothing.
    */
   alarmEvents(info) {
     const language = this.config.language;
-    if (!this.alarmSeen) {
-      this.alarmSeen = { error: info.error ?? 0, alert: info.alert ?? 0 };
-      this.alarmsChanged = true;
-      return;
-    }
+    const learning = !this.alarmSeen;
+    this.alarmSeen ??= {};
     const events = [];
-    if (info.error !== undefined && info.error !== this.alarmSeen.error) {
-      if (info.error !== 0) {
+    const kinds = [
+      ['error', 'E', errorText],
+      ['alert', 'A', alertText],
+    ];
+    for (const [name, prefix, text] of kinds) {
+      const code = info[name];
+      const known = this.alarmSeen[name];
+      if (code === undefined || code === known) {
+        continue;
+      }
+      // Never seen before (first read, or the field was absent): only learnt.
+      if (!learning && known !== undefined && code !== 0) {
         events.push({
-          message: errorText(info.error, language),
-          code: codeText('E', info.error),
-          kind: 'error',
+          message: text(code, language),
+          code: codeText(prefix, code),
+          kind: name === 'error' ? 'error' : 'warning',
         });
       }
-      this.alarmSeen.error = info.error;
+      this.alarmSeen[name] = code;
       this.alarmsChanged = true;
     }
-    if (info.alert !== undefined && info.alert !== this.alarmSeen.alert) {
-      if (info.alert !== 0) {
-        events.push({
-          message: alertText(info.alert, language),
-          code: codeText('A', info.alert),
-          kind: 'warning',
-        });
-      }
-      this.alarmSeen.alert = info.alert;
+    if (learning) {
       this.alarmsChanged = true;
     }
     for (const data of events) {

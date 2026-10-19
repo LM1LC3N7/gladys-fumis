@@ -58,13 +58,16 @@ test/                             node --test, against the SDK's fake Gladys and
 - **The headers hold the credential.** The MAC address and the PIN are put
   in the request headers in `src/client.js` only; never log them, never put
   them in an error message, a status, a URL, `/data` or a Gladys id.
-- **Our own name.** `User-Agent` and `appname` are `gladys-fumis`: never
-  imitate a vendor app.
+- **Our own name.** The `User-Agent` is `gladys-fumis`: never imitate a
+  vendor app. No `appname` header (the reference sends none).
 - **The answer is untrusted.** Bounded size, own keys only (`Object.hasOwn`),
   no object built from its keys with a prototype, linear parsing.
 - **Careful reads.** One request at a time, 3 s minimum between two, never
   faster than the interval after an error.
-- **External ids are forever.** `ext:<selector>:fumis:<hash>` and the feature
+- **Codes.** An error or alert code goes through `readCode` (an integer from
+  0 to 999), in the answer and in `/data` alike.
+- **External ids are forever.** `ext:<selector>:fumis:<scrypt of the MAC>`
+  (no secret: the PIN is) and the feature
   roles (frozen in `test/fixtures/roles.json`). A republished device never
   loses a feature.
 - **The container rootfs is read-only.** Write only under `/data`.

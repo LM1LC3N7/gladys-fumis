@@ -30,7 +30,7 @@ un modèle reconnu), avec, quand le poêle les envoie :
 | Consigne                                | °C, en lecture seule (une sonde, pas un thermostat)                                   |
 | Température du foyer                    | °C (Austroflamm et poêles qui ont un thermocouple)                                    |
 | Niveau de puissance (réglé)             | 1 à 5 en général                                                                      |
-| Puissance thermique (kW)                | La puissance de chauffe annoncée par le poêle                                         |
+| Puissance thermique (kW)                | Pendant la combustion seulement ; 0 à l'arrêt ; rien pendant les autres phases        |
 | Niveau de granulés (%)                  | Seulement si le poêle l'estime                                                        |
 | Erreur, Code d'erreur                   | 0/1, et « E102 : Cheminée ou creuset encrassé… »                                      |
 | Avertissement, Code d'avertissement     | 0/1, et « A001 : Niveau de granulés bas »…                                            |
@@ -42,19 +42,26 @@ un modèle reconnu), avec, quand le poêle les envoie :
 | Signal Wi-Fi (%)                        | Le signal du module WiRCU                                                             |
 
 Les kW et les % n'ont pas d'unité dans Gladys (le cœur ne les propose pas
-pour ces catégories) : l'unité est dans le nom. La puissance thermique n'est
-**pas** envoyée au tableau de bord énergie de Gladys (il la compterait comme
-de l'électricité).
+pour ces catégories) : l'unité est dans le nom. La puissance thermique est
+celle que le poêle annonce pendant la combustion (phases Combustion et
+Combustion bois) ; à l'arrêt elle vaut 0 (le poêle peut continuer d'annoncer
+sa puissance nominale), et pendant l'allumage, l'éco ou le refroidissement
+aucune valeur n'est envoyée (elle suit avec retard). Elle n'est **pas**
+envoyée au tableau de bord énergie de Gladys (il la compterait comme de
+l'électricité).
 
 Déclencheur de scène **Erreur ou avertissement du poêle Fumis** : quand une
 lecture montre un nouveau code d'erreur (E…) ou d'avertissement (A…).
 Variables : `message`, `code` (E102, A001…) et `kind` (`error` ou
 `warning`). Le même code ne redéclenche qu'après avoir disparu. Les derniers
 codes vus sont gardés dans `/data` : un redémarrage ne redéclenche pas une
-alarme toujours présente. Jamais à la toute première lecture.
+alarme toujours présente. Jamais à la toute première lecture. Un code qui
+n'est pas un entier de 0 à 999 est ignoré : le code connu est gardé et rien
+ne se déclenche.
 
 Le badge de l'appareil affiche « cloud », ou « injoignable » quand le cloud
-ne répond pas, refuse l'adresse MAC ou le code PIN, ou n'atteint pas le poêle.
+ne répond pas, refuse l'adresse MAC ou le code PIN, n'atteint pas le poêle,
+ou ne l'a pas vu depuis plus de 10 minutes.
 
 ## Installation
 
@@ -88,14 +95,19 @@ assistant vocal) est refusée sans rien envoyer.
   en-tête de chaque lecture, comme le fait l'application. L'adresse MAC
   l'accompagne : ensemble ils donnent accès au poêle.
 - Ni le code PIN ni l'adresse MAC n'apparaissent dans les journaux, les
-  messages d'état, les adresses des requêtes ou les appareils Gladys (l'appareil
-  est identifié par une empreinte de l'adresse MAC).
+  messages d'état, les adresses des requêtes ou les appareils Gladys.
+  L'appareil est identifié par une empreinte de l'adresse MAC (scrypt,
+  calculée une fois au démarrage, jamais avec le code PIN). Cette empreinte
+  **n'est pas un secret** : les adresses MAC des modules WiRCU commencent
+  toutes par 00:16:D0, on peut donc retrouver l'adresse en essayant les
+  16 millions de possibilités (scrypt fait passer cet essai de quelques
+  secondes à plusieurs jours). Le secret, c'est le code PIN.
 - Le volume `/data` de l'intégration garde seulement la pause en cours (429 ou
   attente après des erreurs), un arrêt sur identifiants refusés et les
-  derniers codes d'erreur et d'avertissement vus, avec une empreinte de
+  derniers codes d'erreur et d'avertissement vus, avec cette empreinte de
   l'adresse MAC. Ni le code PIN, ni son empreinte.
-- L'intégration se présente sous son propre nom (`gladys-fumis`), jamais sous
-  celui d'une application d'un fabricant.
+- L'intégration se présente sous son propre nom (User-Agent `gladys-fumis`),
+  jamais sous celui d'une application d'un fabricant.
 
 ## Rafraîchissement
 
@@ -115,11 +127,18 @@ temps restant.
   l'intervalle écoulé depuis la dernière tentative. L'arrêt n'est levé que par
   une lecture réussie, et il est gardé aux redémarrages.
 - **Poêle non connecté au cloud** (HTTP 404, module WiRCU éteint ou sans
-  Wi-Fi), cloud injoignable, erreur du cloud (5xx, 403) : nouvel essai après
-  1, 2, 5, 10 puis toutes les 15 minutes, jamais plus vite que l'intervalle.
-  Cette attente est gardée aux redémarrages.
+  Wi-Fi) ou **non vu depuis plus de 10 minutes** (le cloud renvoie alors ses
+  dernières valeurs, qui ne sont pas affichées), cloud injoignable, erreur du
+  cloud (5xx) : nouvel essai après 1, 2, 5, 10 puis toutes les 15 minutes,
+  jamais plus vite que l'intervalle. Cette attente est gardée aux
+  redémarrages.
+- **HTTP 400 ou 403** : le cloud refuse la requête elle-même (pas le code
+  PIN) ; il refuse peut-être les clients autres que les applications du
+  poêle. Même attente, et le message d'état le dit.
 - **HTTP 429** : une pause d'au moins 1 minute (Retry-After s'il est donné,
   6 h au plus), pour tous les chemins, gardée aux redémarrages.
+- Une pause du cloud lui-même (429, 5xx, cloud injoignable) est gardée quand
+  vous changez d'adresse MAC ; celle d'un poêle hors ligne ne l'est pas.
 - Une réponse trop grande (plus de 256 Ko) ou qui n'est pas du JSON est
   refusée.
 

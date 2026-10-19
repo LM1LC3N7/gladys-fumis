@@ -61,7 +61,20 @@ test('/data: repaired and capped when read back', () => {
   assert.equal(memory.pause.until, NOW + TIMINGS.rateLimitMax);
   assert.equal(memory.pause.failures, 10);
   assert.deepEqual(memory.block, { retries: 0, retryAt: NOW + TIMINGS.refusedRetry.at(-1) });
-  assert.deepEqual(memory.alarms, { error: 102, alert: 0 });
+  // One invalid code: the whole memory is invalid, the same as none.
+  assert.equal(memory.alarms, null);
+  assert.equal(memory.pause.cloud, false);
+  const codes = (alarms) => normalizeMemory({ key, alarms }, NOW).alarms;
+  assert.deepEqual(codes({ error: 102, alert: 0 }), { error: 102, alert: 0 });
+  assert.deepEqual(codes({ error: 102 }), { error: 102 }, 'an absent code: not seen yet');
+  for (const bad of [-1, 1e6, '102', 1.5, null]) {
+    assert.equal(codes({ error: bad, alert: 0 }), null, String(bad));
+  }
+  assert.equal(codes([102]), null);
+  assert.equal(
+    normalizeMemory({ key, pause: { kind: 'rate', until: NOW + 1, cloud: true } }, NOW).pause.cloud,
+    true,
+  );
   assert.equal(normalizeMemory({ key: 'bad', pause: { until: NOW + 1 } }, NOW).pause, null);
 });
 
@@ -70,6 +83,7 @@ test('the client maps the statuses of the API', async () => {
     [401, 'refused'],
     [404, 'offline'],
     [403, 'forbidden'],
+    [400, 'forbidden'],
     [429, 'rate_limited'],
     [500, 'unavailable'],
     [302, 'http'],

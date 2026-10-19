@@ -150,8 +150,8 @@ export function reasonOf(err) {
       );
     case 'forbidden':
       return both(
-        `the Fumis cloud refused the request${status}`,
-        `le cloud Fumis a refusé la requête${status}`,
+        `the Fumis cloud refused the request${status}; it may refuse clients other than the stove apps (this integration introduces itself as gladys-fumis, it never imitates an app)`,
+        `le cloud Fumis a refusé la requête${status} ; il refuse peut-être les clients autres que les applications du poêle (cette intégration se présente comme gladys-fumis, elle n’imite jamais une application)`,
       );
     case 'bad_response':
     case 'size':
@@ -185,6 +185,11 @@ export const T = {
     both(
       `The Fumis cloud answers, but the stove is not connected to it (WiRCU module off or without Wi-Fi). New try in ${wait.en}.`,
       `Le cloud Fumis répond, mais le poêle n’y est pas connecté (module WiRCU éteint ou sans Wi-Fi). Nouvel essai dans ${wait.fr}.`,
+    ),
+  stale: (unseen, wait) =>
+    both(
+      `The Fumis cloud answers, but the stove has not been seen for ${unseen.en} (WiRCU module off or without Wi-Fi): its old values are not shown. New try in ${wait.en}.`,
+      `Le cloud Fumis répond, mais le poêle n’a pas été vu depuis ${unseen.fr} (module WiRCU éteint ou sans Wi-Fi) : ses anciennes valeurs ne sont pas affichées. Nouvel essai dans ${wait.fr}.`,
     ),
   waiting: (wait) =>
     both(

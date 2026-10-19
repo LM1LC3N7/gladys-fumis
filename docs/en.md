@@ -28,7 +28,7 @@ known model), with, when the stove sends them:
 | Target temperature                     | °C, read only (a sensor, not a thermostat)                                     |
 | Combustion chamber temperature         | °C (Austroflamm and stoves with a thermocouple)                                |
 | Power level (set)                      | 1 to 5 usually                                                                 |
-| Heat output (kW)                       | The heat output the stove reports                                              |
+| Heat output (kW)                       | While burning only; 0 when off; nothing in the other phases                    |
 | Pellet level (%)                       | Only when the stove estimates it                                               |
 | Error, Error code                      | 0/1, and "E102: Chimney or burning pot dirty…"                                 |
 | Warning, Warning code                  | 0/1, and "A001: Low fuel level"…                                               |
@@ -40,17 +40,22 @@ known model), with, when the stove sends them:
 | Wi-Fi signal (%)                       | The signal of the WiRCU module                                                 |
 
 kW and % have no unit in Gladys (the core lists none for these categories):
-the unit is in the name. The heat output is **not** sent to the Gladys energy
+the unit is in the name. The heat output is the one the stove reports while
+burning (Combustion and Wood combustion phases); when off it is 0 (the stove
+may keep reporting its nominal power), and during ignition, eco or cooling no
+value is sent (it lags behind). It is **not** sent to the Gladys energy
 dashboard (it would count it as electricity).
 
 Scene trigger **Fumis stove error or warning**: when a read shows a new error
 code (E…) or warning code (A…). Variables: `message`, `code` (E102, A001…)
 and `kind` (`error` or `warning`). The same code fires again only after it
 cleared. The codes last seen are kept in `/data`: a restart never fires an
-alarm still shown again. Never at the very first read.
+alarm still shown again. Never at the very first read. A code that is not an
+integer from 0 to 999 is ignored: the known code is kept and nothing fires.
 
 The badge of the device shows "cloud", or "unreachable" when the cloud does
-not answer, refuses the MAC address or the PIN, or does not reach the stove.
+not answer, refuses the MAC address or the PIN, does not reach the stove, or
+has not seen it for more than 10 minutes.
 
 ## Installation
 
@@ -83,14 +88,18 @@ voice assistant) is refused and nothing is sent.
   read, as the app does. The MAC address goes with it: together they give
   access to the stove.
 - Neither the PIN nor the MAC address appears in the logs, the status
-  messages, the request URLs or the Gladys devices (the device is identified
-  by a hash of the MAC address).
+  messages, the request URLs or the Gladys devices. The device is identified
+  by a hash of the MAC address (scrypt, computed once at start, never with
+  the PIN). This hash **is no secret**: the MAC addresses of WiRCU modules
+  all start with 00:16:D0, so the address can be found back by trying the
+  16 million candidates (scrypt makes that take days instead of seconds). The
+  secret is the PIN.
 - The `/data` volume of the integration only keeps the current pause (429 or
   the wait after errors), a stop on refused credentials and the error and
-  warning codes last seen, with a hash of the MAC address. Never the PIN, nor
-  a hash of it.
-- The integration introduces itself under its own name (`gladys-fumis`),
-  never as the app of a stove maker.
+  warning codes last seen, with that hash of the MAC address. Never the PIN,
+  nor a hash of it.
+- The integration introduces itself under its own name (User-Agent
+  `gladys-fumis`), never as the app of a stove maker.
 
 ## Refresh
 
@@ -109,11 +118,17 @@ shows the status and the time left.
   attempt. Only a successful read lifts the stop, and it is kept across
   restarts.
 - **Stove not connected to the cloud** (HTTP 404, WiRCU module off or without
-  Wi-Fi), cloud unreachable, cloud error (5xx, 403): a new try after 1, 2, 5,
-  10 then every 15 minutes, never faster than the interval. This wait is kept
-  across restarts.
+  Wi-Fi) or **not seen for more than 10 minutes** (the cloud then sends its
+  last values, which are not shown), cloud unreachable, cloud error (5xx): a
+  new try after 1, 2, 5, 10 then every 15 minutes, never faster than the
+  interval. This wait is kept across restarts.
+- **HTTP 400 or 403**: the cloud refuses the request itself (not the PIN); it
+  may refuse clients other than the stove apps. Same wait, and the status
+  says so.
 - **HTTP 429**: a pause of at least 1 minute (Retry-After when given, 6 h at
   most), for every path, kept across restarts.
+- A pause of the cloud itself (429, 5xx, cloud unreachable) holds when you
+  change the MAC address; the one of an offline stove does not.
 - An answer too large (over 256 KB) or not JSON is refused.
 
 ## Limits

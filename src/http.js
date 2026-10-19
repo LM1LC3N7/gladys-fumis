@@ -13,7 +13,9 @@ import { LIMITS, TIMINGS } from './constants.js';
  * - `no_config`: no MAC address or no PIN (nothing sent);
  * - `refused`: the cloud refused the MAC address or the PIN (401);
  * - `offline`: the cloud does not reach the stove (404 "Stove not connected");
- * - `forbidden`: a 403 (a firewall in front of the API, not the credentials);
+ * - `forbidden`: a 400 or a 403 (the request itself, maybe a refusal of
+ *   third-party clients, not the credentials);
+ * - `stale`: the cloud answered, but has not seen the stove for a while (src/app.js);
  * - `rate_limited`: 429, `retryAfter` in ms when given;
  * - `unavailable`: 5xx;
  * - `network`, `timeout`: no answer;

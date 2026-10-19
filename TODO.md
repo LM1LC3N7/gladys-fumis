@@ -16,13 +16,21 @@ up to date at the end of every milestone.
 
 - [x] **Milestone 1 — core, read only** (2026-10-19): Fumis cloud
       (`GET /v1/status`, MAC address and PIN headers), bounded and untrusted
-      answer, one device per stove (hash of the MAC address), state, phase,
+      answer, one device per stove (scrypt of the MAC address), state, phase,
       temperatures, power, pellet level, errors and warnings with the
       `stove_alarm` scene trigger, counters, careful reads (60 s, 3 s gap,
       backoff, stop on refused credentials, 429 pause, all in `/data`),
       badges, test button, en/fr, docs, cover. Tested against a fake cloud
       only (Node 22 and 24). The store validator was not run by the
       development session (it cannot run it): to run before the release.
+- [x] **Review fixes** (2026-10-19, review of 4b9c232): heat output only
+      while burning (0 off), stove key by scrypt (no secret, documented),
+      one code check (`readCode`, 0 to 999) for the answer and `/data`
+      (an invalid memory is no memory), the codes written again after a
+      failed `/data` write, a cloud pause kept across a MAC change, a stale
+      answer (stove unseen > 10 min) as offline, no `appname`, a status
+      hinting at a refusal of third-party clients on 400/403, an error
+      envelope in a 200 handled as its status.
 - [ ] **Milestone 2 — real stove**: run against a real stove (an Austroflamm
       and another brand if possible), compare with the app (see "To check");
       turn the answers (anonymized: MAC address, IP and PIN removed) into
@@ -80,8 +88,20 @@ first, with real feedback, is the safe order (as gladys-oekofen).
   published for that model only.
 - The pellet level on stoves without a fuel estimate (0 with
   `quantityActualType` 0 and no `quantityDisplay`: not published then).
-- `kw` while off (the reference says it may stay non-zero): the heat output
-  is published as sent.
+- `kw` in each phase (the reference fixtures show 7 kW while off; its
+  RESEARCH.md says it lags behind the power level): v1 publishes it only
+  while burning (status 30, 110), 0 when off (0, 1, 2), nothing in the other
+  phases. Check whether ignition, eco and cooling give a meaningful value.
+- `stoveLastAvailability` against `currentTime`: whether the gap really grows
+  when the WiRCU module is off (and the API answers 200 with old values
+  rather than 404), and whether 10 min is the right threshold (the module
+  updates the cloud every ~30 s).
+- Whether the cloud accepts our own `User-Agent` (`gladys-fumis …`) without
+  `appname` (the reference sends `PythonFumis` and no `appname`, and the HA
+  integration works), and what a refusal of third-party clients looks like
+  (400? 403? an HTML page?).
+- Whether a 200 can hold an error envelope (`{"code":401}`): handled as the
+  status it names, just in case.
 - `timeToService` units (hours per the reference) and its sign when overdue.
 
 ## Decisions
@@ -109,9 +129,11 @@ first, with real feedback, is the safe order (as gladys-oekofen).
   "API non documentée officiellement" / "API not documented officially"),
   the README and the CLAUDE.md; tested in `test/manifest.test.js`.
 - **No identity imitation** (brief): `User-Agent` `gladys-fumis
-(+https://github.com/LM1LC3N7/gladys-fumis)` and `appname` `gladys-fumis`,
-  as the reference sends its own (`PythonFumis`); no vendor app name, no
-  browser User-Agent, no TLS fingerprint change (plain Node `https`).
+(+https://github.com/LM1LC3N7/gladys-fumis)`, as the reference sends its
+  own (`PythonFumis`); no `appname` header (the reference sends none; review
+  point 7); no vendor app name, no browser User-Agent, no TLS fingerprint
+  change (plain Node `https`). A 400 or 403 shows a status saying the cloud
+  may refuse third-party clients (a backoff, never a stop).
 - **The PIN** (brief): a `secret` field, described as "kept by Gladys in its
   database, never shown again, sent only to the Fumis cloud" (a `secret`
   field is stored in clear in the Gladys database; the docs never claim
@@ -120,8 +142,14 @@ first, with real feedback, is the safe order (as gladys-oekofen).
   constant `https://api.fumis.si/v1/status`. Checked as printable ASCII
   without spaces (no header injection), 64 characters at most.
 - **The MAC address is half of the credential**: never logged, nor in a
-  status, nor in `/data`, nor in Gladys (the device id is the first 16 hex
-  digits of `sha256("fumis:" + MAC)`, `/data` keyed by its first 32). The API
+  status, nor in `/data`, nor in Gladys. The stove key is
+  `scryptSync(MAC, 'gladys-fumis', 32, { N: 2 ** 15 })` (review point 2;
+  derived once per MAC address and cached, never from the PIN): its first 16
+  hex digits are the device id, its first 32 key `/data`. The key is **no
+  secret**: WiRCU MAC addresses share the 00:16:D0 prefix, so the 2^24
+  candidates can be tried back (seconds with a plain hash, days with this
+  scrypt); the docs say so, the PIN is the secret. Nothing was published, so
+  the ids changed from the sha256 of 4b9c232 without migration. The API
   answer also holds the MAC address (`unit.id`) and the local IP
   (`unit.ip`): neither is read. Tests check the PIN and the MAC address (all
   spellings) are absent from the logs, the statuses, the requests to Gladys
@@ -140,14 +168,22 @@ first, with real feedback, is the safe order (as gladys-oekofen).
   every 6 h; new settings lift it at once; the test button retries at once
   once the interval has passed; only a successful read lifts it (also in
   `/data`). 404 = stove offline (`FumisStoveOfflineError`): a backoff, never a
-  stop (the stove may be off for the summer). 403 = a refusal of the API or
-  of a firewall, not of the credentials: a backoff. 429 = a pause of
+  stop (the stove may be off for the summer). A 200 whose `stoveLastAvailability`
+  is more than 10 min behind `currentTime` is the same (`stale`: badge
+  unreachable, status "stove not seen for …", no state published, the codes
+  seen untouched). A 200 holding an error envelope `{"code": 401|404}`
+  without a controller is handled as that status. 400 and 403 = a refusal of
+  the request (maybe of third-party clients), not of the credentials: a
+  backoff. 429 = a pause of
   Retry-After between 60 s and 6 h (5 min when absent) for every path. 5xx,
   network, timeout, bad JSON or a non-JSON `Content-Type`: backoff 1, 2, 5,
   10, 15 min, never under the interval. The stop and the pause are in
   `/data`, capped when read back (6 h for a 429, 1 h for a backoff); after a
   restart the first read waits for the end of the pause; a reconnection to
-  Gladys keeps them.
+  Gladys keeps them. A pause of the cloud itself (429, 5xx, 400/403,
+  network, bad answer: `cloud: true` in `/data`) holds when the MAC address
+  changes; the backoff of an offline or stale stove is that stove's and is
+  dropped (review point 5).
 - **Untrusted answer**: 256 KB at most (the reference fixtures are 14 to
   20 KB), parsed once (a BOM dropped), only own keys read (`Object.hasOwn`),
   lists cut to 32 entries and 512 diagnostic variables, numbers finite only
@@ -158,7 +194,9 @@ first, with real feedback, is the safe order (as gladys-oekofen).
   the main screen with a sensor (`actualType` > 0), else the first one; the
   setpoint only when `setType` > 0; the combustion chamber is channel 7 with a
   sensor; `setPower` is the power level (the reference: `actualPower` only
-  mirrors it, not published); `kw` is the heat output; the pellet level is
+  mirrors it, not published); `kw` is the heat output while burning only
+  (status 30, 110), 0 when off (0, 1, 2), nothing in the other phases
+  (review point 1: the reference fixtures show 7 kW off); the pellet level is
   `quantity` × 100 when the stove estimates it (`quantityActualType` > 0 or a
   `quantityDisplay`); `timeToService` -1 = no counter; `heatingTime`
   (seconds) as hours; the Wi-Fi signal with the reference's formula.
@@ -170,8 +208,15 @@ first, with real feedback, is the safe order (as gladys-oekofen).
   reference's codes (`E%03d`, `A%03d`) and descriptions translated in French.
   The scene trigger fires when a code differs from the one last seen and is
   not 0 (the same code fires again only after it cleared); the codes seen are
-  in `/data`, per stove; the very first read without memory only learns; a
-  missing code keeps the known one. Variables `message`, `code`, `kind`.
+  in `/data`, per stove. One check, `readCode` (src/fumis.js), for the
+  answer and `/data` (review point 3): a code is a JSON integer from 0 to
+  999, anything else (-1, 1e6, a string) is undefined, keeps the known code
+  and fires nothing. An invalid memory is no memory. Without memory, or for
+  a code not seen yet (absent from the first reads), a code is only learnt.
+  The codes stay "to write" until a `/data` write succeeds and are written
+  again at the next read (review point 4; a stop right after a failed write
+  can still fire once again at the restart). Variables `message`, `code`,
+  `kind`.
 - **Units** (core `DEVICE_FEATURE_UNITS_BY_CATEGORY`): `celsius` on
   `temperature-sensor`, `hours` on `duration/decimal`; kW and % have no
   category that lists them for these values: no unit, the unit in the
@@ -180,7 +225,7 @@ first, with real feedback, is the safe order (as gladys-oekofen).
   electricity). The room temperature is `temperature-sensor/decimal` (the
   stove's ambient sensor); the setpoint and the combustion chamber are
   probes (kept out of the room averages).
-- **External ids**: `ext:<selector>:fumis:<hash>:<role>`, roles frozen in
+- **External ids**: `ext:<selector>:fumis:<stove key>:<role>`, roles frozen in
   `test/fixtures/roles.json`. A feature appears when the answer has the
   value, and stays once created (read from `gladys.devices`).
 - **Logs**: never the PIN, the MAC address nor a header; `errorReason` never

@@ -135,7 +135,7 @@ test('start: one read with our own headers, the stove as a device, its states, c
   assert.equal(request.headers.password, PIN);
   assert.equal(request.headers['User-Agent'], API.userAgent);
   assert.match(request.headers['User-Agent'], /^gladys-fumis /, 'our own name, no imitation');
-  assert.equal(request.headers.appname, 'gladys-fumis');
+  assert.equal(request.headers.appname, undefined, 'the reference sends no appname');
   assert.ok(!request.url.includes(PIN) && !request.url.includes(MAC), 'no secret in the URL');
   assert.deepEqual(
     gladys.fake.discoveredDevices.map((d) => d.external_id),
@@ -337,6 +337,7 @@ test('5xx, 403 and a non-JSON answer back off, never faster than the interval', 
   server.queue.push({ status: 403, body: '<html>blocked</html>', headers: {} });
   await advance(MINUTE);
   assert.match(message(gladys).en, /refused the request \(HTTP 403\).*2 min/);
+  assert.match(message(gladys).fr, /refuse peut-être les clients autres que les applications/);
   assert.equal(app.blocked, false, 'a 403 is no refused PIN');
   await advance(MINUTE);
   assert.equal(server.requests.length, 3, 'the backoff holds');
@@ -518,4 +519,160 @@ test('the language of the names follows the configuration', async (t) => {
   assert.equal(gladys.fake.discoveredDevices[0].name, 'Austroflamm Clou Duo stove');
   await app.configUpdated({ ...CONFIG, language: 'fr' });
   assert.equal(gladys.fake.discoveredDevices[0].name, 'Poêle Austroflamm Clou Duo');
+});
+
+test('review: an error code outside 0..999 fires nothing, keeps the known code, never again at a restart', async (t) => {
+  const server = fakeCloud();
+  const store = memoryStore();
+  const { gladys, app, advance } = await setup(t, { server, store });
+  for (const bad of [-1, 1e6, '102']) {
+    server.document = clouDuo({ error: bad });
+    await advance(MINUTE);
+  }
+  assert.equal(gladys.fake.sceneEvents.length, 0);
+  assert.deepEqual(store.data.alarms, { error: 0, alert: 0 }, 'the known code is kept');
+  assert.equal(last(gladys, 'error-code'), 'Aucune erreur', 'the last valid state stays');
+  app.stop();
+  const fresh = createFakeGladys({ config: CONFIG });
+  const again = restart(t, { server, store, gladys: fresh });
+  await advance(MINUTE);
+  await again.start(CONFIG);
+  await advance(2 * SECOND);
+  assert.equal(fresh.fake.sceneEvents.length, 0);
+});
+
+test('review: an invalid memory of the codes is no memory: the shown code is learnt, not fired', async (t) => {
+  const store = memoryStore({ key: stoveKey(MAC), alarms: { error: -1, alert: 'x' } });
+  const server = fakeCloud({ document: clouDuo({ error: 102 }) });
+  const { gladys, store: kept } = await setup(t, { server, store });
+  await settle();
+  assert.equal(gladys.fake.sceneEvents.length, 0);
+  assert.deepEqual(kept.data.alarms, { error: 102, alert: 0 });
+});
+
+test('review: a code first absent is learnt when it shows up, never fired', async (t) => {
+  const document = clouDuo();
+  delete document.controller.error;
+  const server = fakeCloud({ document });
+  const { gladys, advance } = await setup(t, { server });
+  server.document = clouDuo({ error: 102 });
+  await advance(MINUTE);
+  assert.equal(gladys.fake.sceneEvents.length, 0);
+  server.document = clouDuo({ error: 241 });
+  await advance(MINUTE);
+  assert.deepEqual(
+    gladys.fake.sceneEvents.map((e) => e.data.code),
+    ['E241'],
+  );
+});
+
+test('review: a failed /data write is retried at the next read; a restart fires nothing again', async (t) => {
+  const server = fakeCloud();
+  const store = memoryStore();
+  const { gladys, app, advance } = await setup(t, { server, store });
+  const save = store.save;
+  store.save = async () => {
+    throw new Error('EROFS');
+  };
+  server.document = clouDuo({ error: 102 });
+  await advance(MINUTE);
+  assert.equal(gladys.fake.sceneEvents.length, 1);
+  assert.equal(app.alarmsChanged, true, 'still to write');
+  store.save = save;
+  await advance(MINUTE);
+  assert.equal(store.data.alarms.error, 102);
+  assert.equal(app.alarmsChanged, false);
+  app.stop();
+  const fresh = createFakeGladys({ config: CONFIG });
+  const again = restart(t, { server, store, gladys: fresh });
+  await advance(MINUTE);
+  await again.start(CONFIG);
+  await advance(2 * SECOND);
+  assert.equal(fresh.fake.sceneEvents.length, 0);
+});
+
+test('review: a 429 pause and a 5xx backoff hold when the MAC address changes; an offline one does not', async (t) => {
+  const other = '0016D0FFEEDD';
+  const server = fakeCloud();
+  const store = memoryStore();
+  const { app, advance } = await setup(t, { server, store });
+  server.queue.push({ status: 429, headers: { 'retry-after': '3600' } });
+  await advance(MINUTE);
+  assert.equal(server.requests.length, 2);
+  await advance(10 * MINUTE);
+  await app.configUpdated({ ...CONFIG, mac_address: other });
+  await advance(10 * SECOND);
+  assert.equal(server.requests.length, 2, 'no read during the 429 pause');
+  assert.equal(app.ratePaused, true);
+  assert.equal(store.data.key, stoveKey(other));
+  assert.equal(store.data.pause.cloud, true);
+  server.mac = other;
+  await advance(50 * MINUTE + 5 * SECOND);
+  assert.equal(server.requests.length, 3, 'read when the pause ends');
+  assert.equal(app.blocked, false);
+  // A 503 backoff holds too, back to the first MAC address.
+  server.queue.push({ status: 503, body: 'Service Unavailable' });
+  await advance(MINUTE);
+  assert.equal(server.requests.length, 4);
+  server.mac = MAC;
+  await app.configUpdated({ ...CONFIG });
+  await advance(10 * SECOND);
+  assert.equal(server.requests.length, 4, 'no read during the 5xx backoff');
+  await advance(MINUTE);
+  assert.equal(server.requests.length, 5);
+  // An offline stove: its backoff is its own, another stove reads at once.
+  server.stoveOffline();
+  await advance(MINUTE);
+  assert.equal(server.requests.length, 6);
+  assert.equal(store.data.pause.cloud, false);
+  server.mac = other;
+  await app.configUpdated({ ...CONFIG, mac_address: other });
+  await advance(5 * SECOND);
+  assert.equal(server.requests.length, 7);
+});
+
+test('review: an answer from a stove unseen for more than 10 min counts as offline', async (t) => {
+  const server = fakeCloud();
+  const store = memoryStore();
+  const { gladys, advance } = await setup(t, { server, store });
+  const alarms = structuredClone(store.data.alarms);
+  const stale = clouDuo({ status: 0, error: 102 });
+  stale.controller.stoveLastAvailability = stale.controller.currentTime - 2 * 86400;
+  server.document = stale;
+  await advance(MINUTE);
+  assert.match(message(gladys).fr, /poêle n’a pas été vu depuis 48 h/);
+  assert.equal(gladys.fake.connectionStatus.connected, false);
+  assert.equal(badgeOf(gladys).transport, 'unreachable');
+  assert.equal(last(gladys, 'state'), 'En chauffe', 'the stale values are not published');
+  assert.equal(gladys.fake.sceneEvents.length, 0);
+  assert.deepEqual(store.data.alarms, alarms, 'the codes seen are untouched');
+  // 9 minutes is not stale.
+  const recent = clouDuo();
+  recent.controller.stoveLastAvailability = recent.controller.currentTime - 9 * 60;
+  server.document = recent;
+  await advance(MINUTE + 5 * SECOND);
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+  assert.equal(badgeOf(gladys).transport, 'cloud');
+});
+
+test('review: an error envelope in a 200 is handled as its status', async (t) => {
+  const server = fakeCloud();
+  const { gladys, app, advance } = await setup(t, { server });
+  server.queue.push({
+    status: 200,
+    body: JSON.stringify({ message: 'Stove not connected', code: 404 }),
+  });
+  await advance(MINUTE);
+  assert.match(message(gladys).en, /stove is not connected to it/);
+  assert.equal(app.blocked, false);
+  server.queue.push({
+    status: 200,
+    body: JSON.stringify({
+      message: "A unit controller with that mac and pin doesn't exist",
+      code: 401,
+    }),
+  });
+  await advance(MINUTE);
+  assert.equal(app.blocked, true, 'a refused PIN stops the reads');
+  assert.match(message(gladys).fr, /refusé l’adresse MAC ou le code PIN/);
 });

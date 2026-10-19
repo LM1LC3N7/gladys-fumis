@@ -63,6 +63,9 @@ export function clouDuo({
       command: 2,
       status,
       heatingSlope: '0.0',
+      // A string, as in the reference fixtures; seen 20 s before the answer.
+      stoveLastAvailability: String(1760868000 - 20),
+      mobileLastAvailability: '1760860000',
       currentTime: 1760868000,
       error,
       alert,

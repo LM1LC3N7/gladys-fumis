@@ -11,6 +11,7 @@
 
 import { open, readFile, rename } from 'node:fs/promises';
 import { POLL_INTERVAL, TIMINGS } from './constants.js';
+import { readCode } from './fumis.js';
 
 export const STATE_FILE = '/data/fumis-state.json';
 
@@ -48,7 +49,29 @@ export function fileStore(path = STATE_FILE) {
 const BACKOFF_MAX = Math.max(TIMINGS.backoff.at(-1), POLL_INTERVAL.max * 1000);
 
 const time = (value) => (Number.isFinite(value) && value > 0 ? value : undefined);
-const code = (value) => (Number.isInteger(value) && value >= 0 && value <= 100_000 ? value : 0);
+
+/**
+ * The codes seen: each a code of readCode or absent (not seen yet). Any other
+ * value makes the whole memory invalid, which is the same as no memory: the
+ * next read learns without firing.
+ */
+function alarmsOf(a) {
+  if (a === null || typeof a !== 'object' || Array.isArray(a)) {
+    return null;
+  }
+  const alarms = {};
+  for (const name of ['error', 'alert']) {
+    if (a[name] === undefined) {
+      continue;
+    }
+    const value = readCode(a[name]);
+    if (value === undefined) {
+      return null;
+    }
+    alarms[name] = value;
+  }
+  return alarms;
+}
 
 /**
  * The persisted state, repaired; the end of a pause or of a stop is capped
@@ -64,13 +87,12 @@ export function normalizeMemory(raw, now = Date.now()) {
           kind,
           until: Math.min(p.until, now + (kind === 'rate' ? TIMINGS.rateLimitMax : BACKOFF_MAX)),
           failures: Number.isInteger(p.failures) && p.failures >= 0 ? Math.min(p.failures, 10) : 0,
+          // A pause of the cloud itself (429, 5xx, network), not of this stove:
+          // kept when the MAC address changes.
+          cloud: p.cloud === true,
         }
       : null;
-  const a = raw?.alarms;
-  const alarms =
-    key && a !== null && typeof a === 'object' && !Array.isArray(a)
-      ? { error: code(a.error), alert: code(a.alert) }
-      : null;
+  const alarms = key ? alarmsOf(raw?.alarms) : null;
   const b = raw?.block;
   const block =
     key && b !== null && typeof b === 'object'

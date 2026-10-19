@@ -5,10 +5,10 @@
 // PIN printed on the WiRCU module: together they are the whole credential.
 // The PIN is a `secret` field; neither the PIN nor the MAC address is ever
 // logged, shown in a status, written to /data or published to Gladys (the
-// device and the /data file are keyed by a hash of the MAC address).
+// device and the /data file are keyed by a scrypt of the MAC address).
 // -----------------------------------------------------------------------------
 
-import { createHash } from 'node:crypto';
+import { scryptSync } from 'node:crypto';
 import { POLL_INTERVAL } from './constants.js';
 
 /** Defaults, mirrored by the manifest (checked by test/manifest.test.js). */
@@ -50,13 +50,32 @@ export function parsePin(raw) {
   return /^[\x21-\x7e]{1,64}$/.test(text) ? { pin: text } : { error: 'invalid' };
 }
 
+/** The scrypt cost of the stove key: 2^15 (about 32 MiB and some tens of ms per MAC address). */
+export const KEY_COST = { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+
+/** The last key derived: the derivation runs once per MAC address, not at every config event. */
+let cached = { mac: '', key: '' };
+
 /**
- * The key of a stove: a hash of its MAC address, never the PIN (a short PIN
- * is easy to find back from its hash). It keys /data, and its first 16 digits
- * the Gladys device, so the MAC address itself never reaches Gladys.
+ * The key of a stove: scrypt of its MAC address (salt "gladys-fumis"), never
+ * of the PIN. It keys /data, and its first 16 digits the Gladys device, so the
+ * MAC address itself never reaches Gladys. It is no secret: the MAC
+ * addresses of WiRCU modules share a maker prefix (00:16:D0), so the 2^24
+ * candidates can be tried back, but scrypt makes that cost days of computing
+ * instead of seconds. The PIN is the secret, and it never enters the key.
  */
-export const stoveKey = (mac) =>
-  mac ? createHash('sha256').update(`fumis:${mac}`, 'utf8').digest('hex').slice(0, 32) : '';
+export function stoveKey(mac) {
+  if (!mac) {
+    return '';
+  }
+  if (cached.mac !== mac) {
+    cached = {
+      mac,
+      key: scryptSync(mac, 'gladys-fumis', 32, KEY_COST).toString('hex').slice(0, 32),
+    };
+  }
+  return cached.key;
+}
 
 const number = (value) =>
   value === undefined || value === null || value === '' ? NaN : Number(value);

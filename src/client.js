@@ -35,9 +35,9 @@ export class FumisClient {
 
   /** The request headers. Never logged: they hold the MAC address and the PIN. */
   headers() {
+    // No `appname`: the reference does not send it.
     return {
       Accept: 'application/json',
-      appname: API.appName,
       'User-Agent': API.userAgent,
       username: this.mac,
       password: this.pin,
@@ -82,7 +82,9 @@ export class FumisClient {
     if (status === 404) {
       throw new FumisError('offline', 'the stove is not connected to the cloud', { status });
     }
-    if (status === 403) {
+    if (status === 400 || status === 403) {
+      // Not the credentials (401): the request itself, maybe a refusal of
+      // third-party clients. A backoff, never a stop.
       throw new FumisError('forbidden', 'the cloud refused the request', { status });
     }
     if (status === 429) {

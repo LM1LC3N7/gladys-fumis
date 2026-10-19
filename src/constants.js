@@ -25,7 +25,6 @@ export const API = {
    * Our own name, as the reference sends its own ("PythonFumis"): never the
    * name or the User-Agent of a vendor app.
    */
-  appName: 'gladys-fumis',
   userAgent: 'gladys-fumis (+https://github.com/LM1LC3N7/gladys-fumis)',
 };
 
