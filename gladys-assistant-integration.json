@@ -6,8 +6,8 @@
     "en": "Pellet stoves with a Fumis WiRCU module (Austroflamm, Haas+Sohn…), read only, via the cloud.",
     "fr": "Poêles à granulés à module Fumis WiRCU (Austroflamm, Haas+Sohn…), en lecture seule, par le cloud."
   },
-  "version": "0.1.0",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-fumis:0.1.0",
+  "version": "0.1.1",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-fumis:0.1.1",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-fumis/main/cover.png",
   "categories": ["climate"],

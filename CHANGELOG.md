@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-19
+
 ### Added
 
 - Pellet stoves with a Fumis WiRCU module (Austroflamm, Haas+Sohn,
@@ -52,4 +54,5 @@ the notes of the version's GitHub Release.
 - An error envelope (`{"code": 401}` or `404`) sent with a 200 is handled as
   that status.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-fumis/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-fumis/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-fumis/releases/tag/v0.1.1
