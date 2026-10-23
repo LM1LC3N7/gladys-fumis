@@ -1,6 +1,6 @@
 {
   "name": "gladys-fumis",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Gladys Assistant external integration for pellet stoves with a Fumis WiRCU module (Fumis cloud, unofficial API), read only. Not affiliated with Fumis.",
   "type": "module",

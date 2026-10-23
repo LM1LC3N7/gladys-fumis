@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-23
+
 ## [0.1.1] - 2026-10-19
 
 ### Added
@@ -54,5 +56,6 @@ the notes of the version's GitHub Release.
 - An error envelope (`{"code": 401}` or `404`) sent with a 200 is handled as
   that status.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-fumis/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-fumis/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/LM1LC3N7/gladys-fumis/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-fumis/releases/tag/v0.1.1
